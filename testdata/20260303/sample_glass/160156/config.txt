@@ -1,0 +1,24 @@
+start_time,160156.30
+end_time,160216.46
+Vtrig,0.500000
+Zig,FALSE
+num_app,12000
+num_ret,12000
+xlength,3.000000
+ylength,3.000000
+filter,no filter
+app_speed_ratio,1.500000
+ret_speed_ratio,1.500000
+Xstep,5
+Ystep,5
+Xstep_count,0
+Ystep_count,0
+loop_time,20.000000
+FIFO_loop,20.000000
+ret_length,8.000000
+sr,FALSE
+sr_time,1.000000
+sr_loop,50000.000000
+move_distance,config.txt
+default_x(um)0.000000
+default_y(um)0.000000
