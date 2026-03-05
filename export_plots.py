@@ -6,6 +6,8 @@ Four-panel (2×2) layout:
   (b) Contact region deflection vs Z
   (c) Deflection (nm) vs ΔZ (nm) — INVOLS validation
   (d) Force (nN) vs δ (nm)
+
+Colors: cornflowerblue (approach) / orange (retract).
 """
 from __future__ import annotations
 import numpy as np
@@ -23,10 +25,12 @@ LINE_W     = 0.9
 MARKER_S   = 1.5
 FIT_W      = 1.8
 
-APP_COLOR  = "#0077bb"
-RET_COLOR  = "#cc3311"
-FAPP_COLOR = "#004488"
-FRET_COLOR = "#882211"
+# Publication palette
+APP_COLOR  = "cornflowerblue"
+RET_COLOR  = "orange"
+# Darker variants for fit lines
+FAPP_COLOR = "#3366aa"
+FRET_COLOR = "#cc7700"
 
 
 def _style(ax, xlabel, ylabel, title=""):
@@ -85,7 +89,8 @@ def export_figure(data: ExportData, out_dir: Path,
     if show in ("Both", "Retract"):
         ax_a.plot(data.ret_z, data.ret_defl, color=RET_COLOR, lw=LINE_W,
                   label="Retract", zorder=2)
-    _style(ax_a, data.x_label, "Deflection (V)", "(a)")
+    _style(ax_a, data.x_label, "Deflection (V)",
+           "(a) Deflection vs Z – Full")
 
     # ── (b) Contact region ───────────────────────────────────────────
     if show in ("Both", "Approach"):
@@ -100,7 +105,8 @@ def export_figure(data: ExportData, out_dir: Path,
         if len(data.fit_ret_x) > 1:
             ax_b.plot(data.fit_ret_x, data.fit_ret_y, color=FRET_COLOR,
                       lw=FIT_W, label=f"Fit (s={data.slope_ret:.1f})", zorder=3)
-    _style(ax_b, data.x_label, "Deflection (V)", "(b)")
+    _style(ax_b, data.x_label, "Deflection (V)",
+           "(b) Contact Region")
 
     # ── (c) Deflection (nm) vs ΔZ (nm) ──────────────────────────────
     if show in ("Both", "Approach"):
@@ -127,7 +133,8 @@ def export_figure(data: ExportData, out_dir: Path,
                   label="slope = 1", zorder=1)
     ax_c.axhline(0, lw=0.4, color="grey", zorder=1)
     ax_c.axvline(0, lw=0.4, color="grey", zorder=1)
-    _style(ax_c, "ΔZ (nm)", "Deflection (nm)", "(c)")
+    _style(ax_c, "ΔZ (nm)", "Deflection (nm)",
+           "(c) Deflection vs ΔZ (INVOLS)")
 
     # ── (d) F vs δ ──────────────────────────────────────────────────
     if show in ("Both", "Approach"):
@@ -144,7 +151,8 @@ def export_figure(data: ExportData, out_dir: Path,
                       lw=FIT_W, zorder=3)
     ax_d.axhline(0, lw=0.4, color="grey", zorder=1)
     ax_d.axvline(0, lw=0.4, color="grey", zorder=1)
-    _style(ax_d, "δ (nm)", "F (nN)", "(d)")
+    _style(ax_d, "δ (nm)", "F (nN)",
+           "(d) Force vs Indentation")
 
     info = (f"INVOLS = {data.invols:.1f} nm/V   "
             f"k = {data.k:.3f} N/m   "

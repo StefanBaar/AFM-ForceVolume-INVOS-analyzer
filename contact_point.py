@@ -4,6 +4,9 @@ contact_point.py – Contact-point detection and linear fits for AFM force curve
 Piecewise-linear (two-segment) fit: sweep a split index, fit independent
 lines to baseline and contact segments, pick the split that minimises
 the total sum-of-squared residuals.
+
+Uses adaptive search ranges based on deflection gradient analysis so the
+algorithm works regardless of where the contact transition falls in the curve.
 """
 from __future__ import annotations
 import numpy as np
@@ -51,12 +54,52 @@ def find_contact_piecewise(z_V: np.ndarray, defl_V: np.ndarray,
     return ContactResult(int(best), float(z_V[best]), float(defl_V[best]))
 
 
+def _estimate_transition_region(defl_V: np.ndarray) -> tuple:
+    """Estimate where the deflection transitions from baseline to contact
+    using gradient analysis.  Returns (frac_lo, frac_hi) as fractions."""
+    n = len(defl_V)
+    win = max(n // 100, 20)
+    grad = np.gradient(defl_V)
+    kernel = np.ones(win) / win
+    grad_smooth = np.convolve(grad, kernel, mode='same')
+    abs_grad = np.abs(grad_smooth)
+    baseline_grad = np.median(abs_grad[:n // 10])
+    threshold = baseline_grad + 0.3 * (np.max(abs_grad) - baseline_grad)
+    above = np.where(abs_grad > threshold)[0]
+    if len(above) > 0:
+        margin = int(0.15 * n)
+        frac_lo = max(0.05, (above[0] - margin) / n)
+        frac_hi = min(0.95, (above[-1] + margin) / n)
+        return (frac_lo, frac_hi)
+    return (0.10, 0.90)
+
+
 def estimate_contact_approach(z_V: np.ndarray, defl_V: np.ndarray) -> ContactResult:
-    return find_contact_piecewise(z_V, defl_V, search_range=(0.50, 0.995))
+    """Detect approach contact point using adaptive search range."""
+    frac_lo, frac_hi = _estimate_transition_region(defl_V)
+    search_lo = max(0.05, frac_lo)
+    search_hi = min(0.995, frac_hi)
+    if search_hi - search_lo < 0.20:
+        mid = (search_lo + search_hi) / 2
+        search_lo = max(0.05, mid - 0.15)
+        search_hi = min(0.995, mid + 0.15)
+    return find_contact_piecewise(z_V, defl_V,
+                                  search_range=(search_lo, search_hi),
+                                  n_coarse=200, n_fine=100)
 
 
 def estimate_contact_retract(z_V: np.ndarray, defl_V: np.ndarray) -> ContactResult:
-    return find_contact_piecewise(z_V, defl_V, search_range=(0.005, 0.50))
+    """Detect retract contact point using adaptive search range."""
+    frac_lo, frac_hi = _estimate_transition_region(defl_V)
+    search_lo = max(0.005, frac_lo)
+    search_hi = min(0.95, frac_hi)
+    if search_hi - search_lo < 0.20:
+        mid = (search_lo + search_hi) / 2
+        search_lo = max(0.005, mid - 0.15)
+        search_hi = min(0.95, mid + 0.15)
+    return find_contact_piecewise(z_V, defl_V,
+                                  search_range=(search_lo, search_hi),
+                                  n_coarse=200, n_fine=100)
 
 
 # ── Linear fits ──────────────────────────────────────────────────────────────

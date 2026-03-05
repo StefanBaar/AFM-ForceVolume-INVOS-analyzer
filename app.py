@@ -22,6 +22,10 @@ from contact_point import (
 )
 from export_plots import export_figure, ExportData
 
+# ─── Global appearance ───────────────────────────────────────────────────────
+# Change this single value to adjust transparency of ALL data-point markers
+ALPHA = 0.5
+
 # ─── Cantilever presets ──────────────────────────────────────────────────────
 CANTILEVERS = {
     "AC40":  {"k": 0.09,  "f0_kHz": 32,  "half_angle_deg": 17.5},
@@ -29,14 +33,133 @@ CANTILEVERS = {
     "AC240": {"k": 2.0,   "f0_kHz": 70,  "half_angle_deg": 17.5},
 }
 
-NEON_BLUE = "#00e5ff"
-NEON_PINK = "#ff10f0"
+NEON_BLUE      = "#00e5ff"
+NEON_PINK      = "#ff10f0"
+# Darker variants for fit lines (more saturated / less bright)
+FIT_BLUE       = "#0099aa"
+FIT_PINK       = "#aa0ea0"
+NEON_GREEN     = "#39ff14"
+FIT_GREEN      = "#28b30e"
+NEON_YELLOW    = "#fff01f"
 
-#default_path = "D:\シュテファン"
 default_path = str(Path.cwd())
-#print(default_path)
 
 st.set_page_config(page_title="AFM Force-Curve Viewer", layout="wide")
+
+# ─── Neon CSS theme ──────────────────────────────────────────────────────────
+st.markdown(f"""
+<style>
+/* ── Slider tracks & thumbs ─────────────────────────────────── */
+div[data-testid="stSlider"] > div > div > div > div {{
+    background: linear-gradient(90deg, {NEON_BLUE}, {NEON_PINK}) !important;
+}}
+div[data-testid="stSlider"] div[role="slider"] {{
+    background-color: {NEON_PINK} !important;
+    border: 2px solid {NEON_BLUE} !important;
+    box-shadow: 0 0 8px {NEON_PINK}88, 0 0 16px {NEON_BLUE}44;
+}}
+div[data-testid="stSlider"] div[role="slider"]:hover {{
+    box-shadow: 0 0 14px {NEON_PINK}cc, 0 0 28px {NEON_BLUE}88;
+}}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+div.stButton > button,
+div[data-testid="stDownloadButton"] > button {{
+    background: linear-gradient(135deg, {NEON_BLUE}22, {NEON_PINK}22) !important;
+    border: 1.5px solid {NEON_BLUE} !important;
+    color: {NEON_BLUE} !important;
+    font-weight: 600 !important;
+    transition: all 0.25s ease !important;
+    text-shadow: 0 0 6px {NEON_BLUE}66;
+}}
+div.stButton > button:hover,
+div[data-testid="stDownloadButton"] > button:hover {{
+    background: linear-gradient(135deg, {NEON_BLUE}44, {NEON_PINK}44) !important;
+    border-color: {NEON_PINK} !important;
+    color: {NEON_PINK} !important;
+    box-shadow: 0 0 12px {NEON_PINK}66, 0 0 24px {NEON_BLUE}33;
+    text-shadow: 0 0 8px {NEON_PINK}88;
+}}
+
+/* ── Toggle switches ────────────────────────────────────────── */
+div[data-testid="stToggle"] label span[data-testid="stToggleSwitch"] > span {{
+    background-color: {NEON_BLUE} !important;
+    box-shadow: 0 0 6px {NEON_BLUE}88;
+}}
+
+/* ── Radio buttons ──────────────────────────────────────────── */
+div[data-testid="stRadio"] label span[data-checked="true"]::before {{
+    background-color: {NEON_PINK} !important;
+}}
+div[role="radiogroup"] label[data-checked="true"] {{
+    color: {NEON_PINK} !important;
+}}
+
+/* ── Selectbox ──────────────────────────────────────────────── */
+div[data-testid="stSelectbox"] > div > div {{
+    border-color: {NEON_BLUE}66 !important;
+}}
+div[data-testid="stSelectbox"] > div > div:focus-within {{
+    border-color: {NEON_PINK} !important;
+    box-shadow: 0 0 8px {NEON_PINK}44;
+}}
+
+/* ── Number inputs ──────────────────────────────────────────── */
+div[data-testid="stNumberInput"] input {{
+    border-color: {NEON_BLUE}44 !important;
+}}
+div[data-testid="stNumberInput"] input:focus {{
+    border-color: {NEON_PINK} !important;
+    box-shadow: 0 0 6px {NEON_PINK}44;
+}}
+
+/* ── Checkbox ───────────────────────────────────────────────── */
+div[data-testid="stCheckbox"] label span[aria-checked="true"] {{
+    background-color: {NEON_PINK} !important;
+    border-color: {NEON_PINK} !important;
+}}
+
+/* ── Expanders ──────────────────────────────────────────────── */
+details[data-testid="stExpander"] summary {{
+    border-left: 3px solid {NEON_BLUE}66;
+    padding-left: 8px;
+}}
+details[data-testid="stExpander"][open] summary {{
+    border-left-color: {NEON_PINK};
+}}
+
+/* ── Metrics ────────────────────────────────────────────────── */
+div[data-testid="stMetric"] label {{
+    color: {NEON_BLUE} !important;
+    font-size: 0.78rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}}
+div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
+    color: #fafafa !important;
+    text-shadow: 0 0 4px {NEON_BLUE}44;
+}}
+
+/* ── Sidebar header accents ─────────────────────────────────── */
+section[data-testid="stSidebar"] h2 {{
+    color: {NEON_BLUE} !important;
+    font-size: 0.9rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid {NEON_BLUE}33;
+    padding-bottom: 4px;
+}}
+
+/* ── Title ──────────────────────────────────────────────────── */
+h1 {{
+    background: linear-gradient(90deg, {NEON_BLUE}, {NEON_PINK});
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("AFM Force-Curve Viewer")
 
 # =====================================================================
@@ -195,21 +318,25 @@ def dec2(a, b, n=4000):
     s = max(1, len(a)//n)
     return a[::s], b[::s]
 
+
 MAX = 4000
 PH  = 380
 
 dark_layout = dict(
     height=PH,
     margin=dict(l=60, r=60, t=10, b=10),
-    #template="plotly_dark",
-    #paper_bgcolor="rgba(0,0,0,0)",
-    #plot_bgcolor="#0e1117",
     font=dict(color="#fafafa", size=12),
 )
 
 def _legend_right():
     return dict(orientation="v", yanchor="top", y=1.0,
                 xanchor="left", x=1.02, font=dict(size=11))
+
+# Helper: rgba string from hex + alpha
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip('#')
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
 # =====================================================================
 #  ROW 1 — Plot 1 (full raw) | Plot 2 (contact region)
@@ -220,29 +347,40 @@ with col1:
     zoom_cp = st.toggle("Zoom to contact region", value=False, key="zoom_cp")
 
 fig1 = go.Figure()
+
+# --- Approach: data as dots ---
 if show_curves in ("Both", "Approach"):
     ax, ay = dec2(_x(fc.app_z_V), fc.app_defl_V, MAX)
-    fig1.add_trace(go.Scattergl(x=ax, y=ay, mode="lines",
-        line=dict(color=NEON_BLUE, width=1.2), name="Approach"))
-    fig1.add_trace(go.Scatter(
-        x=[_x(fc.app_z_V)[cp_app_idx]], y=[fc.app_defl_V[cp_app_idx]],
-        mode="markers", marker=dict(size=9, color=NEON_BLUE,
-        symbol="circle-open", line=dict(width=2.5)), name="CP app"))
+    fig1.add_trace(go.Scattergl(x=ax, y=ay, mode="markers",
+        marker=dict(color=_rgba(NEON_BLUE, ALPHA), size=2.5),
+        name="Approach"))
+    cp_x_app = float(_x(fc.app_z_V)[cp_app_idx])
+    fig1.add_vline(x=cp_x_app, line_width=1.8, line_dash="dash",
+                   line_color=NEON_BLUE, opacity=0.85,
+                   annotation_text="CP app", annotation_position="top left",
+                   annotation_font_size=10, annotation_font_color=NEON_BLUE)
+
+# --- Retract: data as dots ---
 if show_curves in ("Both", "Retract"):
     rx, ry = dec2(_x(fc.ret_z_V), fc.ret_defl_V, MAX)
-    fig1.add_trace(go.Scattergl(x=rx, y=ry, mode="lines",
-        line=dict(color=NEON_PINK, width=1.2), name="Retract"))
-    fig1.add_trace(go.Scatter(
-        x=[_x(fc.ret_z_V)[cp_ret_idx]], y=[fc.ret_defl_V[cp_ret_idx]],
-        mode="markers", marker=dict(size=9, color=NEON_PINK,
-        symbol="circle-open", line=dict(width=2.5)), name="CP ret"))
+    fig1.add_trace(go.Scattergl(x=rx, y=ry, mode="markers",
+        marker=dict(color=_rgba(NEON_PINK, ALPHA), size=2.5),
+        name="Retract"))
+    cp_x_ret = float(_x(fc.ret_z_V)[cp_ret_idx])
+    fig1.add_vline(x=cp_x_ret, line_width=1.8, line_dash="dash",
+                   line_color=NEON_PINK, opacity=0.85,
+                   annotation_text="CP ret", annotation_position="top right",
+                   annotation_font_size=10, annotation_font_color=NEON_PINK)
+
+# Turnaround marker
 fig1.add_trace(go.Scatter(
     x=[_x(fc.app_z_V)[-1]], y=[fc.app_defl_V[-1]],
     mode="markers", marker=dict(size=8, color="white", symbol="diamond"),
     name="Turnaround"))
 
 if zoom_cp:
-    x_lo = float(_x(fc.app_z_V)[cp_app_idx-200])
+    safe_idx = max(cp_app_idx - 200, 0)
+    x_lo = float(_x(fc.app_z_V)[safe_idx])
     all_x_ends = [float(_x(fc.app_z_V)[-1])]
     if show_curves in ("Both", "Retract"):
         ret_x = _x(fc.ret_z_V)
@@ -268,14 +406,15 @@ if show_curves in ("Both", "Approach"):
     a_x  = _x(a_zc, zero_first=x_in_um)
     cx, cy = dec2(a_x, a_dc, MAX)
     fig2.add_trace(go.Scattergl(x=cx, y=cy, mode="markers",
-        marker=dict(color=NEON_BLUE, size=3), name="Approach"))
+        marker=dict(color=_rgba(NEON_BLUE, ALPHA), size=3),
+        name="Approach"))
     if len(fit_app.x_fit) > 1:
         fit_x = _x(fit_app.x_fit)
         if x_in_um and len(a_zc) > 0:
             fit_x = fit_x - _x(a_zc)[0]
         fig2.add_trace(go.Scatter(
             x=fit_x, y=fit_app.y_fit, mode="lines",
-            line=dict(color=NEON_BLUE, width=2.5),
+            line=dict(color=FIT_BLUE, width=2.5),
             name=f"Fit app (s={fit_app.slope:.1f})"))
 
 if show_curves in ("Both", "Retract"):
@@ -284,14 +423,15 @@ if show_curves in ("Both", "Retract"):
     r_x  = _x(r_zc, zero_first=x_in_um)
     cx, cy = dec2(r_x, r_dc, MAX)
     fig2.add_trace(go.Scattergl(x=cx, y=cy, mode="markers",
-        marker=dict(color=NEON_PINK, size=3), name="Retract"))
+        marker=dict(color=_rgba(NEON_PINK, ALPHA), size=3),
+        name="Retract"))
     if len(fit_ret.x_fit) > 1:
         fit_x = _x(fit_ret.x_fit)
         if x_in_um and len(r_zc) > 0:
             fit_x = fit_x - _x(r_zc)[0]
         fig2.add_trace(go.Scatter(
             x=fit_x, y=fit_ret.y_fit, mode="lines",
-            line=dict(color=NEON_PINK, width=2.5),
+            line=dict(color=FIT_PINK, width=2.5),
             name=f"Fit ret (s={fit_ret.slope:.1f})"))
 
 fig2.update_layout(
@@ -350,17 +490,19 @@ fig3 = go.Figure()
 if show_curves in ("Both", "Approach"):
     dx, dy = dec2(a_dz_nm, a_defl_nm, MAX)
     fig3.add_trace(go.Scattergl(x=dx, y=dy, mode="markers",
-        marker=dict(color=NEON_BLUE, size=3), name="Approach"))
+        marker=dict(color=_rgba(NEON_BLUE, ALPHA), size=3),
+        name="Approach"))
     if len(fa_dz) > 1:
         fig3.add_trace(go.Scatter(x=fa_dz, y=fa_defl, mode="lines",
-            line=dict(color=NEON_BLUE, width=2.5), name="Fit app"))
+            line=dict(color=FIT_BLUE, width=2.5), name="Fit app"))
 if show_curves in ("Both", "Retract"):
     dx, dy = dec2(r_dz_nm, r_defl_nm, MAX)
     fig3.add_trace(go.Scattergl(x=dx, y=dy, mode="markers",
-        marker=dict(color=NEON_PINK, size=3), name="Retract"))
+        marker=dict(color=_rgba(NEON_PINK, ALPHA), size=3),
+        name="Retract"))
     if len(fr_dz) > 1:
         fig3.add_trace(go.Scatter(x=fr_dz, y=fr_defl, mode="lines",
-            line=dict(color=NEON_PINK, width=2.5), name="Fit ret"))
+            line=dict(color=FIT_PINK, width=2.5), name="Fit ret"))
 
 all_dz = []
 if show_curves in ("Both", "Approach") and len(a_dz_nm) > 0:
@@ -390,17 +532,19 @@ fig4 = go.Figure()
 if show_curves in ("Both", "Approach"):
     dx, dy = dec2(a_delta, a_F, MAX)
     fig4.add_trace(go.Scattergl(x=dx, y=dy, mode="markers",
-        marker=dict(color=NEON_BLUE, size=3), name="Approach"))
+        marker=dict(color=_rgba(NEON_BLUE, ALPHA), size=3),
+        name="Approach"))
     if len(fa_delta) > 1:
         fig4.add_trace(go.Scatter(x=fa_delta, y=fa_F, mode="lines",
-            line=dict(color=NEON_BLUE, width=2.5), name="Fit app"))
+            line=dict(color=FIT_BLUE, width=2.5), name="Fit app"))
 if show_curves in ("Both", "Retract"):
     dx, dy = dec2(r_delta, r_F, MAX)
     fig4.add_trace(go.Scattergl(x=dx, y=dy, mode="markers",
-        marker=dict(color=NEON_PINK, size=3), name="Retract"))
+        marker=dict(color=_rgba(NEON_PINK, ALPHA), size=3),
+        name="Retract"))
     if len(fr_delta) > 1:
         fig4.add_trace(go.Scatter(x=fr_delta, y=fr_F, mode="lines",
-            line=dict(color=NEON_PINK, width=2.5), name="Fit ret"))
+            line=dict(color=FIT_PINK, width=2.5), name="Fit ret"))
 fig4.add_hline(y=0, line_width=0.5, line_color="grey")
 fig4.add_vline(x=0, line_width=0.5, line_color="grey")
 fig4.update_layout(
@@ -411,6 +555,106 @@ fig4.update_layout(
 )
 with col4:
     st.plotly_chart(fig4, use_container_width=True)
+
+# =====================================================================
+#  ROW 3 — Plot 5: INVOLS vs Indentation (linearity check)
+# =====================================================================
+
+def sliding_invols(z_V, defl_V, cp_idx, z_scale_um, window_frac=0.08,
+                   n_steps=80):
+    """Compute local INVOLS in a sliding window along the contact region.
+
+    Returns arrays of (indentation_nm, local_invols_nm_per_V).
+    """
+    contact_z = z_V[cp_idx:]
+    contact_d = defl_V[cp_idx:]
+    n = len(contact_z)
+    win = max(int(n * window_frac), 30)
+    if n < win + 10:
+        return np.array([]), np.array([])
+
+    step = max(1, (n - win) // n_steps)
+    indent_nm = []
+    local_invols = []
+    z_cp = contact_z[0]
+    d_cp = contact_d[0]
+
+    for i in range(0, n - win, step):
+        seg_z = contact_z[i:i + win]
+        seg_d = contact_d[i:i + win]
+        if len(seg_z) < 10:
+            continue
+        try:
+            coeffs = np.polyfit(seg_z, seg_d, 1)
+        except (np.linalg.LinAlgError, ValueError):
+            continue
+        slope = coeffs[0]
+        if abs(slope) < 1e-12:
+            continue
+        loc_invols = abs(z_scale_um * 1000.0 / slope)
+        # Midpoint indentation (δ = ΔZ − Δdefl·INVOLS)
+        mid = i + win // 2
+        dz = (contact_z[mid] - z_cp) * z_scale_um * 1000
+        dd = (contact_d[mid] - d_cp) * loc_invols
+        delta = dz - dd
+        indent_nm.append(delta)
+        local_invols.append(loc_invols)
+
+    return np.array(indent_nm), np.array(local_invols)
+
+
+st.markdown("---")
+col5_full = st.columns(1)[0]
+
+with col5_full:
+    st.markdown(
+        f"#### <span style='color:{NEON_GREEN}'>Cantilever Linearity Check</span>"
+        " — INVOLS vs Indentation Depth",
+        unsafe_allow_html=True)
+
+fig5 = go.Figure()
+
+if show_curves in ("Both", "Approach"):
+    ind_a, inv_a = sliding_invols(fc.app_z_V, fc.app_defl_V,
+                                  cp_app_idx, z_scale)
+    if len(ind_a) > 0:
+        fig5.add_trace(go.Scattergl(x=ind_a, y=inv_a, mode="markers",
+            marker=dict(color=_rgba(NEON_BLUE, ALPHA), size=5),
+            name="Approach"))
+        # Overall INVOLS reference line
+        fig5.add_hline(y=fit_app.invols_nm_per_V, line_width=1.5,
+                       line_dash="dash", line_color=FIT_BLUE,
+                       annotation_text=f"Global app = {fit_app.invols_nm_per_V:.0f}",
+                       annotation_font_color=FIT_BLUE,
+                       annotation_font_size=10)
+
+if show_curves in ("Both", "Retract"):
+    # For retract, reverse the segment: from turnaround to CP
+    ret_z_flip = fc.ret_z_V[:cp_ret_idx+1][::-1]
+    ret_d_flip = fc.ret_defl_V[:cp_ret_idx+1][::-1]
+    ind_r, inv_r = sliding_invols(ret_z_flip, ret_d_flip, 0, z_scale)
+    if len(ind_r) > 0:
+        fig5.add_trace(go.Scattergl(x=ind_r, y=inv_r, mode="markers",
+            marker=dict(color=_rgba(NEON_PINK, ALPHA), size=5),
+            name="Retract"))
+        fig5.add_hline(y=fit_ret.invols_nm_per_V, line_width=1.5,
+                       line_dash="dash", line_color=FIT_PINK,
+                       annotation_text=f"Global ret = {fit_ret.invols_nm_per_V:.0f}",
+                       annotation_font_color=FIT_PINK,
+                       annotation_font_size=10,
+                       annotation_position="bottom right")
+
+fig5.update_layout(
+    title=dict(text="<b>Local INVOLS vs Indentation Depth</b>",
+               x=0.01, y=0.98, font=dict(size=13)),
+    xaxis_title="δ (nm)",
+    yaxis_title="Local INVOLS (nm/V)",
+    legend=_legend_right(),
+    **{**dark_layout, "height": 400},
+)
+with col5_full:
+    st.plotly_chart(fig5, use_container_width=True)
+
 
 # =====================================================================
 #  METRICS
