@@ -32,6 +32,10 @@ CANTILEVERS = {
 NEON_BLUE = "#00e5ff"
 NEON_PINK = "#ff10f0"
 
+#default_path = "D:\シュテファン"
+default_path = str(Path.cwd())
+#print(default_path)
+
 st.set_page_config(page_title="AFM Force-Curve Viewer", layout="wide")
 st.title("AFM Force-Curve Viewer")
 
@@ -39,42 +43,43 @@ st.title("AFM Force-Curve Viewer")
 #  SIDEBAR
 # =====================================================================
 st.sidebar.header("Data Location")
-data_root = st.sidebar.text_input("Root data directory", value=str(Path.cwd()))
+data_root = st.sidebar.text_input("Root data directory", value=default_path)
 root_path = Path(data_root).expanduser().resolve()
 if not root_path.is_dir():
     st.error(f"Directory not found: `{root_path}`"); st.stop()
 
-dataset_dirs = discover_datasets(root_path)
-if not dataset_dirs:
-    st.warning(f"No `ForceCurve_*.lvm` found under `{root_path}`."); st.stop()
+with st.sidebar.expander("Data Path"):
+    dataset_dirs = discover_datasets(root_path)
+    if not dataset_dirs:
+        st.warning(f"No `ForceCurve_*.lvm` found under `{root_path}`."); st.stop()
 
-entries, max_depth = build_directory_tree(dataset_dirs, root_path)
-st.sidebar.header("Dataset")
-level_hints = ["Date", "Sample", "Time", "Folder", "Sub-folder"]
-filtered_entries = entries
-for level in range(max_depth):
-    options = list(OrderedDict.fromkeys(
-        parts[level] for parts, _ in filtered_entries if len(parts) > level))
-    if not options: break
-    label = level_hints[level] if level < len(level_hints) else f"Level {level}"
-    chosen = st.sidebar.selectbox(label, options, index=len(options)-1,
-                                  key=f"level_{level}")
-    filtered_entries = [(p, fp) for p, fp in filtered_entries
-                        if len(p) > level and p[level] == chosen]
-if not filtered_entries:
-    st.error("No matching dataset."); st.stop()
-selected_dir = filtered_entries[0][1]
-st.sidebar.caption(f"`{selected_dir}`")
+    entries, max_depth = build_directory_tree(dataset_dirs, root_path)
+    st.header("Dataset")
+    level_hints = ["Date", "Sample", "Time", "Folder", "Sub-folder"]
+    filtered_entries = entries
+    for level in range(max_depth):
+        options = list(OrderedDict.fromkeys(
+            parts[level] for parts, _ in filtered_entries if len(parts) > level))
+        if not options: break
+        label = level_hints[level] if level < len(level_hints) else f"Level {level}"
+        chosen = st.selectbox(label, options, index=len(options)-1,
+                                      key=f"level_{level}")
+        filtered_entries = [(p, fp) for p, fp in filtered_entries
+                            if len(p) > level and p[level] == chosen]
+    if not filtered_entries:
+        st.error("No matching dataset."); st.stop()
+    selected_dir = filtered_entries[0][1]
+    st.caption(f"`{selected_dir}`")
 
-config = FCConfig()
-for cand in [selected_dir, selected_dir.parent,
-             selected_dir.parent.parent, selected_dir.parent.parent.parent]:
-    if (cand / "config.txt").is_file():
-        config = FCConfig.from_file(cand / "config.txt"); break
+    config = FCConfig()
+    for cand in [selected_dir, selected_dir.parent,
+                 selected_dir.parent.parent, selected_dir.parent.parent.parent]:
+        if (cand / "config.txt").is_file():
+            config = FCConfig.from_file(cand / "config.txt"); break
 
-fc_files = list_force_curves(selected_dir)
-if not fc_files:
-    st.warning("No ForceCurve_*.lvm found."); st.stop()
+    fc_files = list_force_curves(selected_dir)
+    if not fc_files:
+        st.warning("No ForceCurve_*.lvm found."); st.stop()
 
 st.sidebar.header("Navigation")
 fc_idx = st.sidebar.slider("Force Curve Index", 0, len(fc_files)-1,
@@ -195,10 +200,10 @@ PH  = 380
 
 dark_layout = dict(
     height=PH,
-    margin=dict(l=60, r=60, t=10, b=50),
-    template="plotly_dark",
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="#0e1117",
+    margin=dict(l=60, r=60, t=10, b=10),
+    #template="plotly_dark",
+    #paper_bgcolor="rgba(0,0,0,0)",
+    #plot_bgcolor="#0e1117",
     font=dict(color="#fafafa", size=12),
 )
 
