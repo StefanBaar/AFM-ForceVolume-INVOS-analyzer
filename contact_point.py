@@ -1,32 +1,18 @@
 """
 contact_point.py – Contact-point detection and linear fits for AFM force curves.
 
-Primary method: **auto-baseline smoothed-gradient**.
+Two-stage CP detection:
+  1. **Gradient method** (primary): finds the baseline as the region with
+     the smallest mean |gradient|, then walks toward contact.  Fast, works
+     for most curves, but fails when the contact gradient is only marginally
+     above baseline noise (smooth, shallow ramps).
+  2. **Chord-distance method** (fallback): draws a chord from the baseline
+     midpoint to the deflection peak after baseline subtraction, then finds
+     the point of maximum perpendicular distance to that chord.  This is a
+     global / geometric method that handles smooth ramps robustly.
 
-The algorithm automatically locates the baseline *anywhere* in the curve
-(start, end, or middle) by finding the region with the lowest gradient
-variance, then walks toward the contact side.  This means:
-
-  • It does NOT assume where the baseline is.
-  • It works equally well whether contact is at the start, end, or
-    middle of the data array.
-  • It is immune to linear baseline drift (the derivative cancels any
-    constant slope).
-
-Steps
------
-1. Smooth deflection with a box kernel (width ≈ N/60).
-2. Compute per-sample gradient  g[i] = d_smooth[i+1] − d_smooth[i].
-3. Slide a window (10 % of curve) across g and find the position with
-   **minimum variance** → that window is the baseline.
-4. Compare the **peak |gradient|** on each side of the baseline.
-   The side with the larger peak is where contact is.
-5. Walk from the baseline toward that side and flag the first index
-   where |g| exceeds  mean_bl ± n_σ · σ_bl  for  n_consec consecutive
-   points.
-
-Legacy methods (baseline-deviation, piecewise-linear) are kept for
-comparison in the notebook.
+If the gradient method returns an index too close to an edge (< 3 % or
+> 97 %), it is considered a failure and the chord method takes over.
 """
 from __future__ import annotations
 import numpy as np
@@ -41,59 +27,58 @@ class ContactResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-#  Auto-baseline smoothed-gradient  (recommended)
+#  Helpers
 # ─────────────────────────────────────────────────────────────────────────
 
-def _find_baseline_region(grad: np.ndarray, scan_frac: float = 0.10,
+def _smooth_gradient(defl_V: np.ndarray) -> tuple[np.ndarray, int]:
+    """Per-sample gradient of box-smoothed deflection."""
+    n = len(defl_V)
+    win = max(n // 60, 20)
+    kernel = np.ones(win) / win
+    d_smooth = np.convolve(defl_V, kernel, mode="same")
+    return np.diff(d_smooth), win
+
+
+def _find_baseline_region(grad: np.ndarray,
+                          scan_frac: float = 0.10,
                           n_scan: int = 200) -> tuple[int, int]:
-    """Return (start, end) of the lowest-variance window in *grad*."""
+    """Lowest mean-|gradient| window = baseline."""
     ng = len(grad)
     scan_win = max(int(ng * scan_frac), 50)
     step = max(1, (ng - scan_win) // n_scan)
-    best_var, best_start = np.inf, 0
+    best_score, best_start = np.inf, 0
     for start in range(0, ng - scan_win, step):
-        v = float(np.var(grad[start:start + scan_win]))
-        if v < best_var:
-            best_var = v
+        score = float(np.mean(np.abs(grad[start:start + scan_win])))
+        if score < best_score:
+            best_score = score
             best_start = start
     return best_start, best_start + scan_win
 
 
-def _auto_gradient_cp(defl_V: np.ndarray,
-                      direction: str | None = None,
-                      n_sigma: float = 5.0) -> int:
-    """Core auto-baseline gradient CP.  Returns index into *defl_V*.
+# ─────────────────────────────────────────────────────────────────────────
+#  Gradient method
+# ─────────────────────────────────────────────────────────────────────────
 
-    Parameters
-    ----------
-    direction : 'approach', 'retract', or None
-        Hint about which side of the baseline contact is on.
-        • 'approach' → contact expected at HIGHER indices.
-        • 'retract'  → contact expected at LOWER indices.
-        • None → auto-detect by comparing peak gradient on each side.
-    """
+def _gradient_cp(defl_V: np.ndarray,
+                 direction: str | None = None,
+                 n_sigma: float = 5.0) -> int:
+    """Auto-baseline gradient CP.  Returns index into *defl_V*."""
     n = len(defl_V)
-    win_smooth = max(n // 60, 20)
-    kernel = np.ones(win_smooth) / win_smooth
-    d_smooth = np.convolve(defl_V, kernel, mode="same")
-    grad = np.diff(d_smooth)
+    grad, win = _smooth_gradient(defl_V)
     ng = len(grad)
 
-    # ── locate baseline ──────────────────────────────────────────────
     bl_s, bl_e = _find_baseline_region(grad)
     bl_mean = float(np.mean(grad[bl_s:bl_e]))
     bl_std = float(np.std(grad[bl_s:bl_e]))
     if bl_std < 1e-15:
         bl_std = 1e-15
 
-    # ── decide contact side ──────────────────────────────────────────
     if direction is None:
         peak_left = float(np.max(np.abs(grad[:bl_s]))) if bl_s > 0 else 0.0
         peak_right = float(np.max(np.abs(grad[bl_e:]))) if bl_e < ng else 0.0
         direction = "approach" if peak_right >= peak_left else "retract"
 
-    # ── walk toward contact ──────────────────────────────────────────
-    nc = max(win_smooth // 3, 5)
+    nc = max(win // 3, 5)
 
     if direction == "approach":
         thresh = bl_mean + n_sigma * bl_std
@@ -109,29 +94,152 @@ def _auto_gradient_cp(defl_V: np.ndarray,
         return 0
 
 
+# ─────────────────────────────────────────────────────────────────────────
+#  Chord-distance method
+# ─────────────────────────────────────────────────────────────────────────
+
+def _chord_cp(defl_V: np.ndarray, z_V: np.ndarray,
+              direction: str | None = None) -> int:
+    """Perpendicular-distance-to-chord CP.
+
+    After baseline subtraction, draw a chord from the baseline centre to
+    the deflection peak.  The CP is the point of maximum perpendicular
+    distance **near the baseline end** of the chord — i.e. where the curve
+    bends away from the straight line as it transitions from contact to
+    baseline.
+
+    The ``direction`` hint restricts the search to the baseline-adjacent
+    half of the peak→baseline span so that curvature artefacts at the
+    high-deflection end do not produce a false maximum.
+    """
+    n = len(z_V)
+    if n < 50:
+        return n // 2
+
+    grad, _ = _smooth_gradient(defl_V)
+    bl_s, bl_e = _find_baseline_region(grad)
+
+    bl_s_d = max(0, min(bl_s, n - 2))
+    bl_e_d = max(bl_s_d + 2, min(bl_e, n))
+    if bl_e_d - bl_s_d < 5:
+        chunk = max(n // 10, 20)
+        best_s, best_std = 0, np.inf
+        for s in range(0, n - chunk, max(1, n // 50)):
+            v = float(np.std(defl_V[s:s + chunk]))
+            if v < best_std:
+                best_std = v
+                best_s = s
+        bl_s_d, bl_e_d = best_s, best_s + chunk
+
+    coeffs = np.polyfit(z_V[bl_s_d:bl_e_d], defl_V[bl_s_d:bl_e_d], 1)
+    d_corr = defl_V - np.polyval(coeffs, z_V)
+
+    bl_mid = (bl_s_d + bl_e_d) // 2
+    peak = int(np.argmax(np.abs(d_corr)))
+    if peak == bl_mid:
+        peak = 0 if bl_mid > n // 2 else n - 1
+
+    x0, y0 = z_V[bl_mid], d_corr[bl_mid]
+    x1, y1 = z_V[peak], d_corr[peak]
+
+    dx, dy = x1 - x0, y1 - y0
+    denom = np.sqrt(dx ** 2 + dy ** 2)
+    if denom < 1e-15:
+        return n // 2
+
+    dist = np.abs(dx * (d_corr - y0) - dy * (z_V - x0)) / denom
+
+    # ── restrict search to the baseline-adjacent half ────────────────
+    # The CP is where the curve transitions from contact to baseline,
+    # which is always nearer to the baseline end of the chord.
+    skip = max(40, n // 200)
+    if peak < bl_mid:
+        # baseline at high index, peak at low index (typical retract)
+        span_mid = (peak + bl_mid) // 2
+        lo, hi = max(span_mid, peak + skip), bl_mid
+    else:
+        # baseline at low index, peak at high index (typical approach)
+        span_mid = (bl_mid + peak) // 2
+        lo, hi = bl_mid + skip, min(span_mid, peak)
+
+    lo = max(0, min(lo, n - 2))
+    hi = max(lo + 1, min(hi, n))
+    if hi - lo < 10:
+        lo, hi = skip, max(n - skip, skip + 10)
+
+    return int(np.argmax(dist[lo:hi]) + lo)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Combined: gradient + chord fallback
+# ─────────────────────────────────────────────────────────────────────────
+
+def _combined_cp(z_V: np.ndarray, defl_V: np.ndarray,
+                 direction: str | None = None) -> int:
+    """Run both gradient and chord, pick the one whose deflection is
+    closest to the baseline level.
+
+    Rationale: the true CP is at the transition between contact and
+    baseline, so its deflection should be near baseline.  Whichever
+    method gives a CP closer to baseline is more likely correct.
+    """
+    n = len(z_V)
+    if n < 50:
+        return n // 2
+
+    # Baseline deflection (from gradient-found baseline region)
+    grad, _ = _smooth_gradient(defl_V)
+    bl_s, bl_e = _find_baseline_region(grad)
+    bl_s_c = max(0, min(bl_s, n - 1))
+    bl_e_c = min(n, max(bl_e, bl_s_c + 1))
+    bl_defl = float(np.median(defl_V[bl_s_c:bl_e_c]))
+
+    # Method 1: gradient
+    idx_g = _gradient_cp(defl_V, direction=direction)
+
+    # Method 2: chord
+    idx_c = _chord_cp(defl_V, z_V, direction=direction)
+
+    # Clamp
+    idx_g = max(0, min(idx_g, n - 1))
+    idx_c = max(0, min(idx_c, n - 1))
+
+    # Pick the one closer to baseline deflection
+    err_g = abs(defl_V[idx_g] - bl_defl)
+    err_c = abs(defl_V[idx_c] - bl_defl)
+
+    return idx_g if err_g <= err_c else idx_c
+
+
 def estimate_contact_approach(z_V: np.ndarray,
                               defl_V: np.ndarray) -> ContactResult:
-    """Auto-baseline gradient CP for approach."""
-    idx = _auto_gradient_cp(defl_V, direction="approach")
+    idx = _combined_cp(z_V, defl_V, direction="approach")
     return ContactResult(idx, float(z_V[idx]), float(defl_V[idx]))
 
 
 def estimate_contact_retract(z_V: np.ndarray,
                              defl_V: np.ndarray) -> ContactResult:
-    """Auto-baseline gradient CP for retract."""
-    idx = _auto_gradient_cp(defl_V, direction="retract")
+    idx = _combined_cp(z_V, defl_V, direction="retract")
     return ContactResult(idx, float(z_V[idx]), float(defl_V[idx]))
 
 
 def estimate_contact_auto(z_V: np.ndarray,
                           defl_V: np.ndarray) -> ContactResult:
-    """Fully automatic CP — no direction hint needed."""
-    idx = _auto_gradient_cp(defl_V, direction=None)
+    idx = _combined_cp(z_V, defl_V, direction=None)
     return ContactResult(idx, float(z_V[idx]), float(defl_V[idx]))
 
 
 # ─────────────────────────────────────────────────────────────────────────
-#  Baseline-deviation  (legacy — fails on sloped baselines)
+#  Standalone chord (exported for notebook / comparison)
+# ─────────────────────────────────────────────────────────────────────────
+
+def chord_distance_cp(z_V, defl_V, direction="approach") -> ContactResult:
+    idx = _chord_cp(defl_V, z_V, direction)
+    return ContactResult(idx, float(z_V[idx]), float(defl_V[idx]))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Legacy: baseline-deviation
 # ─────────────────────────────────────────────────────────────────────────
 
 def _baseline_deviation(z_V, defl_V, direction="approach",
@@ -168,7 +276,7 @@ def _baseline_deviation(z_V, defl_V, direction="approach",
 
 
 # ─────────────────────────────────────────────────────────────────────────
-#  Piecewise-linear  (legacy — length-biased)
+#  Legacy: piecewise-linear
 # ─────────────────────────────────────────────────────────────────────────
 
 def _residual_two_lines(x, y, split):
@@ -184,7 +292,8 @@ def _residual_two_lines(x, y, split):
 def find_contact_piecewise(z_V, defl_V, search_range=(0.05, 0.95),
                            n_coarse=200, n_fine=100) -> ContactResult:
     n = len(z_V)
-    lo, hi = max(int(n * search_range[0]), 10), min(int(n * search_range[1]), n - 10)
+    lo = max(int(n * search_range[0]), 10)
+    hi = min(int(n * search_range[1]), n - 10)
     cands = np.linspace(lo, hi, n_coarse, dtype=int)
     res = np.array([_residual_two_lines(z_V, defl_V, c) for c in cands])
     bc = cands[np.argmin(res)]

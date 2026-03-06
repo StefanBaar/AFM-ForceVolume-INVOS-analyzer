@@ -708,6 +708,18 @@ c10.metric("Curves", len(fc_files))
 #  EXPORT
 # =====================================================================
 if st.sidebar.button("Export publication figure", key="export_btn"):
+    # Gather linearity data for export
+    _la_dz = lin_app["dz"] if lin_app is not None else np.array([])
+    _la_sl = lin_app["slope"] if lin_app is not None else np.array([])
+    _la_dv = lin_app["dev_pct"] if lin_app is not None else np.array([])
+    _la_ref = lin_app["ref_slope"] if lin_app is not None else 0.0
+    _la_end = float(lin_app["dz"][find_linear_end(lin_app["dev_pct"], lin_app["ref_end_idx"], dev_threshold)]) if lin_app is not None else 0.0
+    _lr_dz = lin_ret["dz"] if lin_ret is not None else np.array([])
+    _lr_sl = lin_ret["slope"] if lin_ret is not None else np.array([])
+    _lr_dv = lin_ret["dev_pct"] if lin_ret is not None else np.array([])
+    _lr_ref = lin_ret["ref_slope"] if lin_ret is not None else 0.0
+    _lr_end = float(lin_ret["dz"][find_linear_end(lin_ret["dev_pct"], lin_ret["ref_end_idx"], dev_threshold)]) if lin_ret is not None else 0.0
+
     edata = ExportData(
         app_z=_x(fc.app_z_V), app_defl=fc.app_defl_V,
         ret_z=_x(fc.ret_z_V), ret_defl=fc.ret_defl_V,
@@ -729,7 +741,14 @@ if st.sidebar.button("Export publication figure", key="export_btn"):
         slope_app=fit_app.slope, slope_ret=fit_ret.slope,
         invols=invols, k=k_spring, phase_deg=phase_deg,
         cp_app_idx=cp_app_idx, cp_ret_idx=cp_ret_idx,
+        cp_app_x=float(_x(fc.app_z_V)[cp_app_idx]),
+        cp_ret_x=float(_x(fc.ret_z_V)[cp_ret_idx]),
         show=show_curves, filename=fc_files[fc_idx].stem,
+        lin_app_dz=_la_dz, lin_app_slope=_la_sl, lin_app_dev=_la_dv,
+        lin_app_ref=_la_ref, lin_app_end_nm=_la_end,
+        lin_ret_dz=_lr_dz, lin_ret_slope=_lr_sl, lin_ret_dev=_lr_dv,
+        lin_ret_ref=_lr_ref, lin_ret_end_nm=_lr_end,
+        dev_threshold=dev_threshold,
     )
     with tempfile.TemporaryDirectory() as tmp:
         out_path = export_figure(edata, Path(tmp), fmt=export_fmt, dpi=300)
