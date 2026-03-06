@@ -1,12 +1,18 @@
 """
 contact_point.py – Contact-point detection and linear fits for AFM force curves.
 
-Piecewise-linear (two-segment) fit: sweep a split index, fit independent
-lines to baseline and contact segments, pick the split that minimises
-the total sum-of-squared residuals.
+Primary method: **baseline-deviation**.
+  1.  Fit a line to the known non-contact (baseline) portion.
+  2.  Extrapolate it across the whole curve.
+  3.  Walk *toward* the contact region and flag the first index where
+      |deflection − baseline_prediction| exceeds  n_sigma · noise
+      for n_consec consecutive points.
 
-Uses adaptive search ranges based on deflection gradient analysis so the
-algorithm works regardless of where the contact transition falls in the curve.
+This avoids the length-bias inherent in piecewise-linear splitting
+(which puts the CP too far into the contact region when contact is
+longer than baseline).
+
+A legacy piecewise-linear method is kept for comparison / fallback.
 """
 from __future__ import annotations
 import numpy as np
@@ -20,7 +26,90 @@ class ContactResult:
     defl_V: float
 
 
-# ── Piecewise-linear fit ─────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+#  Baseline-deviation  (recommended)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _baseline_deviation(z_V: np.ndarray, defl_V: np.ndarray,
+                        direction: str = "approach",
+                        baseline_frac: float = 0.10,
+                        n_sigma: float = 5.0,
+                        n_consec: int = 10) -> ContactResult:
+    """
+    Baseline-extrapolation contact-point detection.
+
+    Parameters
+    ----------
+    direction : 'approach' or 'retract'
+        * approach – baseline is at the START, walk forward.
+        * retract  – baseline is at the END, walk backward.
+    baseline_frac : float
+        Fraction of the curve used to define the baseline.
+    n_sigma : float
+        Deviation threshold in units of baseline noise.
+    n_consec : int
+        Number of consecutive above-threshold points required
+        to declare contact onset (rejects isolated noise spikes).
+    """
+    n = len(z_V)
+
+    # ── define baseline segment ──────────────────────────────────────
+    if direction == "approach":
+        bl_end = max(int(n * baseline_frac), 30)
+        bl_z, bl_d = z_V[:bl_end], defl_V[:bl_end]
+    else:
+        bl_start = min(int(n * (1 - baseline_frac)), n - 30)
+        bl_z, bl_d = z_V[bl_start:], defl_V[bl_start:]
+
+    # ── fit & extrapolate ────────────────────────────────────────────
+    coeffs = np.polyfit(bl_z, bl_d, 1)
+    bl_pred = np.polyval(coeffs, z_V)
+
+    # noise = std of baseline residuals
+    if direction == "approach":
+        noise = float(np.std(defl_V[:bl_end] - bl_pred[:bl_end]))
+    else:
+        noise = float(np.std(defl_V[bl_start:] - bl_pred[bl_start:]))
+
+    threshold = n_sigma * noise
+    deviation = np.abs(defl_V - bl_pred)
+
+    # ── walk toward contact ──────────────────────────────────────────
+    if direction == "approach":
+        for i in range(bl_end, n - n_consec):
+            if all(deviation[i + j] > threshold for j in range(n_consec)):
+                return ContactResult(i, float(z_V[i]), float(defl_V[i]))
+        # fallback
+        return ContactResult(bl_end, float(z_V[bl_end]),
+                             float(defl_V[bl_end]))
+    else:
+        bl_edge = min(int(n * (1 - baseline_frac)), n - 30)
+        for i in range(bl_edge, n_consec, -1):
+            if all(deviation[i - j] > threshold for j in range(n_consec)):
+                return ContactResult(i, float(z_V[i]), float(defl_V[i]))
+        return ContactResult(bl_edge, float(z_V[bl_edge]),
+                             float(defl_V[bl_edge]))
+
+
+def estimate_contact_approach(z_V: np.ndarray,
+                              defl_V: np.ndarray) -> ContactResult:
+    """Baseline-deviation CP for approach curves."""
+    return _baseline_deviation(z_V, defl_V, direction="approach",
+                               baseline_frac=0.10, n_sigma=5.0,
+                               n_consec=10)
+
+
+def estimate_contact_retract(z_V: np.ndarray,
+                             defl_V: np.ndarray) -> ContactResult:
+    """Baseline-deviation CP for retract curves."""
+    return _baseline_deviation(z_V, defl_V, direction="retract",
+                               baseline_frac=0.10, n_sigma=5.0,
+                               n_consec=10)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+#  Piecewise-linear  (legacy / comparison)
+# ─────────────────────────────────────────────────────────────────────────
 
 def _residual_two_lines(x: np.ndarray, y: np.ndarray, split: int) -> float:
     if split < 2 or split > len(x) - 2:
@@ -35,78 +124,34 @@ def _residual_two_lines(x: np.ndarray, y: np.ndarray, split: int) -> float:
 
 
 def find_contact_piecewise(z_V: np.ndarray, defl_V: np.ndarray,
-                           search_range: tuple = (0.15, 0.95),
-                           n_coarse: int = 150, n_fine: int = 80,
-                           ) -> ContactResult:
+                           search_range: tuple = (0.05, 0.95),
+                           n_coarse: int = 200,
+                           n_fine: int = 100) -> ContactResult:
+    """Two-segment piecewise-linear fit (kept for comparison)."""
     n = len(z_V)
     lo = max(int(n * search_range[0]), 10)
     hi = min(int(n * search_range[1]), n - 10)
     candidates = np.linspace(lo, hi, n_coarse, dtype=int)
-    residuals = np.array([_residual_two_lines(z_V, defl_V, c) for c in candidates])
+    residuals = np.array([_residual_two_lines(z_V, defl_V, c)
+                          for c in candidates])
     best_coarse = candidates[np.argmin(residuals)]
     half = max(int((hi - lo) / n_coarse), 20)
     fine_lo = max(best_coarse - half, lo)
     fine_hi = min(best_coarse + half, hi)
-    fine_candidates = np.linspace(fine_lo, fine_hi, n_fine, dtype=int)
-    fine_residuals = np.array([_residual_two_lines(z_V, defl_V, c)
-                               for c in fine_candidates])
-    best = fine_candidates[np.argmin(fine_residuals)]
+    fine_cands = np.linspace(fine_lo, fine_hi, n_fine, dtype=int)
+    fine_res = np.array([_residual_two_lines(z_V, defl_V, c)
+                         for c in fine_cands])
+    best = fine_cands[np.argmin(fine_res)]
     return ContactResult(int(best), float(z_V[best]), float(defl_V[best]))
 
 
-def _estimate_transition_region(defl_V: np.ndarray) -> tuple:
-    """Estimate where the deflection transitions from baseline to contact
-    using gradient analysis.  Returns (frac_lo, frac_hi) as fractions."""
-    n = len(defl_V)
-    win = max(n // 100, 20)
-    grad = np.gradient(defl_V)
-    kernel = np.ones(win) / win
-    grad_smooth = np.convolve(grad, kernel, mode='same')
-    abs_grad = np.abs(grad_smooth)
-    baseline_grad = np.median(abs_grad[:n // 10])
-    threshold = baseline_grad + 0.3 * (np.max(abs_grad) - baseline_grad)
-    above = np.where(abs_grad > threshold)[0]
-    if len(above) > 0:
-        margin = int(0.15 * n)
-        frac_lo = max(0.05, (above[0] - margin) / n)
-        frac_hi = min(0.95, (above[-1] + margin) / n)
-        return (frac_lo, frac_hi)
-    return (0.10, 0.90)
-
-
-def estimate_contact_approach(z_V: np.ndarray, defl_V: np.ndarray) -> ContactResult:
-    """Detect approach contact point using adaptive search range."""
-    frac_lo, frac_hi = _estimate_transition_region(defl_V)
-    search_lo = max(0.05, frac_lo)
-    search_hi = min(0.995, frac_hi)
-    if search_hi - search_lo < 0.20:
-        mid = (search_lo + search_hi) / 2
-        search_lo = max(0.05, mid - 0.15)
-        search_hi = min(0.995, mid + 0.15)
-    return find_contact_piecewise(z_V, defl_V,
-                                  search_range=(search_lo, search_hi),
-                                  n_coarse=200, n_fine=100)
-
-
-def estimate_contact_retract(z_V: np.ndarray, defl_V: np.ndarray) -> ContactResult:
-    """Detect retract contact point using adaptive search range."""
-    frac_lo, frac_hi = _estimate_transition_region(defl_V)
-    search_lo = max(0.005, frac_lo)
-    search_hi = min(0.95, frac_hi)
-    if search_hi - search_lo < 0.20:
-        mid = (search_lo + search_hi) / 2
-        search_lo = max(0.005, mid - 0.15)
-        search_hi = min(0.95, mid + 0.15)
-    return find_contact_piecewise(z_V, defl_V,
-                                  search_range=(search_lo, search_hi),
-                                  n_coarse=200, n_fine=100)
-
-
-# ── Linear fits ──────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────
+#  Linear fits
+# ─────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class LinearFitResult:
-    slope: float           # V_defl / V_z
+    slope: float
     intercept: float
     invols_nm_per_V: float
     x_fit: np.ndarray
@@ -123,8 +168,7 @@ def fit_contact_region(z_V: np.ndarray, defl_V: np.ndarray,
     if len(z_seg) < 5:
         return LinearFitResult(0, 0, 0, z_seg, d_seg)
     coeffs = np.polyfit(z_seg, d_seg, 1)
-    slope = coeffs[0]
-    intercept = coeffs[1]
+    slope, intercept = coeffs[0], coeffs[1]
     y_fit = np.polyval(coeffs, z_seg)
     invols = abs(z_scale * 1000.0 / slope) if abs(slope) > 1e-12 else 0
     return LinearFitResult(slope, intercept, invols, z_seg, y_fit)

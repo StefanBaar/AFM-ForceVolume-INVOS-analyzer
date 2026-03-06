@@ -1,11 +1,11 @@
-start_time,120213.40
-end_time,120324.05
-Vtrig,1.000000
+start_time,143300.21
+end_time,143509.71
+Vtrig,1.800000
 Zig,FALSE
-num_app,30000
-num_ret,30000
-xlength,3.000000
-ylength,3.000000
+num_app,60000
+num_ret,60000
+xlength,0.000000
+ylength,0.000000
 filter,no filter
 app_speed_ratio,1.500000
 ret_speed_ratio,1.500000
@@ -15,7 +15,7 @@ Xstep_count,0
 Ystep_count,0
 loop_time,20.000000
 FIFO_loop,20.000000
-ret_length,5.000000
+ret_length,10.000000
 sr,FALSE
 sr_time,1.000000
 sr_loop,50000.000000
